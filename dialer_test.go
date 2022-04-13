@@ -8,12 +8,12 @@ import (
 )
 
 func TestConnection(t *testing.T) {
-	conn := NewSocketConnector(SocketConfig{
+	dialer := NewSocketDialer(SocketConfig{
 		Network:       "tcp",
 		RemoteAddress: "127.0.0.1:8888",
 		RetryMax:      -1,
 		RetryDelay:    time.Second,
-	}, WithErrorFunc(func(conn *SocketConnector, err error) (continued bool) {
+	}, WithErrorFunc(func(conn *SocketDialer, err error) (continued bool) {
 		fmt.Println(err)
 		return true
 	}), WithReadFunc(func(conn net.Conn) error {
@@ -26,7 +26,7 @@ func TestConnection(t *testing.T) {
 		return nil
 	}))
 	time.AfterFunc(time.Minute*5, func() {
-		conn.Shutdown()
+		dialer.Shutdown()
 	})
-	conn.Serve()
+	dialer.Serve()
 }

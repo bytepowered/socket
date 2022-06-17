@@ -22,7 +22,7 @@ type (
 type SocketState uint32
 
 const (
-	StateConnecting    SocketState = iota // 正在建立连接中
+	StateConnecting    SocketState = iota // 未连接状态，正在建立连接中
 	StateOpen                             // 已建立连接并且可以读取数据
 	SocketStateClosing                    // 连接正在关闭
 	SocketStateClosed                     // 连接已关闭或者没有链接成功
@@ -72,148 +72,151 @@ func NewSocketDialer(config SocketConfig, opts ...SocketDialerOptions) *SocketDi
 	return so
 }
 
-func (nc *SocketDialer) SetDialFunc(f OnDialFunc) *SocketDialer {
-	nc.onDialFunc = f
-	return nc
+func (sd *SocketDialer) SetDialFunc(f OnDialFunc) *SocketDialer {
+	sd.onDialFunc = f
+	return sd
 }
 
-func (nc *SocketDialer) SetOpenFunc(f OnOpenFunc) *SocketDialer {
-	nc.onOpenFunc = f
-	return nc
+func (sd *SocketDialer) SetOpenFunc(f OnOpenFunc) *SocketDialer {
+	sd.onOpenFunc = f
+	return sd
 }
 
-func (nc *SocketDialer) SetCloseFunc(f OnCloseFunc) *SocketDialer {
-	nc.onCloseFunc = f
-	return nc
+func (sd *SocketDialer) SetCloseFunc(f OnCloseFunc) *SocketDialer {
+	sd.onCloseFunc = f
+	return sd
 }
 
-func (nc *SocketDialer) SetRecvFunc(f OnReadFunc) *SocketDialer {
-	nc.onReadFunc = f
-	return nc
+func (sd *SocketDialer) SetRecvFunc(f OnReadFunc) *SocketDialer {
+	sd.onReadFunc = f
+	return sd
 }
 
-func (nc *SocketDialer) OnErrorFunc(f OnErrorFunc) *SocketDialer {
-	nc.onErrorFunc = f
-	return nc
+func (sd *SocketDialer) OnErrorFunc(f OnErrorFunc) *SocketDialer {
+	sd.onErrorFunc = f
+	return sd
 }
 
-func (nc *SocketDialer) State() SocketState {
-	return SocketState(nc.state)
+func (sd *SocketDialer) State() SocketState {
+	return SocketState(sd.state)
 }
 
-func (nc *SocketDialer) Serve() {
-	assert(nc.onDialFunc, "'onDialFunc' is required")
-	assert(nc.onErrorFunc, "'onErrorFunc' is required")
-	assert(nc.onDialFunc, "'onDialFunc' is required")
-	assert(nc.onOpenFunc, "'onOpenFunc' is required")
-	assert(nc.onCloseFunc, "'onCloseFunc' is required")
-	nc.config.ReadTimeout = nc.incr(nc.config.ReadTimeout, time.Second, time.Second*10)
-	nc.config.RetryDelay = nc.incr(nc.config.RetryDelay, time.Second, time.Second*5)
-	var retry int
+func (sd *SocketDialer) Serve() {
+	assert(sd.onDialFunc, "'onDialFunc' is required")
+	assert(sd.onErrorFunc, "'onErrorFunc' is required")
+	assert(sd.onDialFunc, "'onDialFunc' is required")
+	assert(sd.onOpenFunc, "'onOpenFunc' is required")
+	assert(sd.onCloseFunc, "'onCloseFunc' is required")
+	sd.config.ReadTimeout = sd.incr(sd.config.ReadTimeout, time.Second, time.Second*10)
+	sd.config.RetryDelay = sd.incr(sd.config.RetryDelay, time.Second, time.Second*5)
+	var retries int
 	var delay time.Duration
-	refresh := func(newconn net.Conn) {
-		if nc.conn != nil {
-			_ = nc.conn.Close()
+	reset := func(newconn net.Conn) {
+		if sd.conn != nil {
+			_ = sd.conn.Close()
 		}
-		nc.conn = newconn
-		retry = 0
+		sd.conn = newconn
+		retries = 0
 		delay = time.Millisecond * 5
 	}
 	reconnect := func() {
-		if nc.config.RetryMax > 0 && retry >= nc.config.RetryMax {
-			nc.setState(SocketStateClosing)
+		if sd.config.RetryMax > 0 && retries >= sd.config.RetryMax {
+			sd.setState(SocketStateClosing)
 		} else {
-			retry++
-			nc.setState(StateConnecting)
-			time.Sleep(nc.config.RetryDelay)
+			retries++
+			sd.ResetState()
+			time.Sleep(sd.config.RetryDelay)
 		}
 	}
-	checkerr := func(err error) {
+	retry := func(err error) {
 		select {
-		case <-nc.downctx.Done():
-			nc.setState(SocketStateClosing)
-			return
+		case <-sd.downctx.Done():
+			sd.setState(SocketStateClosing)
 		default:
 			// next
 		}
 		if errors.Is(err, io.EOF) {
 			reconnect()
-		} else if nc.onErrorFunc(nc, err) {
-			return
-		} else {
+		}
+		if sd.onErrorFunc(sd, err) {
 			reconnect()
 		}
 	}
-	defer nc.Close()
-	nc.setState(StateConnecting)
+	defer sd.Close()
+	sd.ResetState()
 	for {
 		select {
-		case <-nc.Done():
+		case <-sd.Done():
 			return
 		default:
 			// next
 		}
-		switch SocketState(atomic.LoadUint32(&nc.state)) {
-		case SocketStateClosing:
+		switch SocketState(atomic.LoadUint32(&sd.state)) {
+		case SocketStateClosing, SocketStateClosed:
 			return
 		case StateConnecting:
-			if conn, err := nc.onDialFunc(nc.config); err != nil {
-				checkerr(fmt.Errorf("connection dial: %w", err))
-			} else if err = nc.onOpenFunc(conn, nc.config); err != nil {
-				checkerr(fmt.Errorf("connection open: %w", err))
+			if conn, err := sd.onDialFunc(sd.config); err != nil {
+				retry(fmt.Errorf("connection dial: %w", err))
+			} else if err = sd.onOpenFunc(conn, sd.config); err != nil {
+				retry(fmt.Errorf("connection open: %w", err))
 			} else {
-				refresh(conn)
-				nc.setState(StateOpen)
+				reset(conn)
+				sd.setState(StateOpen)
 			}
 		case StateOpen:
-			if err := nc.conn.SetReadDeadline(time.Now().Add(nc.config.ReadTimeout)); err != nil {
-				checkerr(fmt.Errorf("connection set read options: %w", err))
-			} else if err = nc.onReadFunc(nc.conn); err != nil {
+			if err := sd.conn.SetReadDeadline(time.Now().Add(sd.config.ReadTimeout)); err != nil {
+				retry(fmt.Errorf("connection set read options: %w", err))
+			} else if err = sd.onReadFunc(sd.conn); err != nil {
 				var terr = err
 				if werr := errors.Unwrap(err); werr != nil {
 					terr = werr
 				}
 				if nerr, ok := terr.(net.Error); ok && (nerr.Temporary() || nerr.Timeout()) {
-					time.Sleep(nc.incr(delay, time.Millisecond*5, time.Millisecond*100))
+					time.Sleep(sd.incr(delay, time.Millisecond*5, time.Millisecond*100))
 				} else {
-					checkerr(err)
+					retry(err)
 				}
 			}
 		}
 	}
 }
 
-func (nc *SocketDialer) Shutdown() {
-	nc.downfun()
+func (sd *SocketDialer) Shutdown() {
+	sd.downfun()
 }
 
-func (nc *SocketDialer) Done() <-chan struct{} {
-	return nc.downctx.Done()
+func (sd *SocketDialer) Done() <-chan struct{} {
+	return sd.downctx.Done()
 }
 
-func (nc *SocketDialer) Close() {
-	nc.close0()
+func (sd *SocketDialer) Close() {
+	sd.close0()
 }
 
-func (nc *SocketDialer) setState(s SocketState) {
-	if s == SocketStateClosing && nc.conn != nil {
-		_ = nc.conn.SetDeadline(time.Time{})
+func (sd *SocketDialer) ResetState() {
+	sd.setState(StateConnecting)
+}
+
+func (sd *SocketDialer) setState(s SocketState) {
+	if s == SocketStateClosing && sd.conn != nil {
+		_ = sd.conn.SetDeadline(time.Time{})
 	}
-	atomic.StoreUint32(&nc.state, uint32(s))
+	atomic.StoreUint32(&sd.state, uint32(s))
 }
 
-func (nc *SocketDialer) close0() {
-	defer nc.setState(SocketStateClosed)
-	if nc.conn == nil {
+func (sd *SocketDialer) close0() {
+	defer sd.setState(SocketStateClosed)
+	if sd.conn == nil {
 		return
 	}
-	defer nc.onCloseFunc(nc.conn)
-	if err := nc.conn.Close(); err != nil && !strings.Contains(err.Error(), "closed network connection") {
-		nc.onErrorFunc(nc, fmt.Errorf("connection close: %w", err))
+	defer sd.onCloseFunc(sd.conn)
+	err := sd.conn.Close()
+	if err != nil && !strings.Contains(err.Error(), "closed network connection") {
+		sd.onErrorFunc(sd, fmt.Errorf("connection close: %w", err))
 	}
 }
 
-func (nc *SocketDialer) incr(v time.Duration, def, max time.Duration) time.Duration {
+func (sd *SocketDialer) incr(v time.Duration, def, max time.Duration) time.Duration {
 	if v == 0 {
 		v = def
 	} else {
@@ -223,6 +226,12 @@ func (nc *SocketDialer) incr(v time.Duration, def, max time.Duration) time.Durat
 		v = max
 	}
 	return v
+}
+
+func WithCloseFunc(f OnCloseFunc) SocketDialerOptions {
+	return func(c *SocketDialer) {
+		c.onCloseFunc = f
+	}
 }
 
 func WithOpenFunc(f OnOpenFunc) SocketDialerOptions {

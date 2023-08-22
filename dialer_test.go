@@ -1,4 +1,4 @@
-package netx
+package socket
 
 import (
 	"fmt"
@@ -10,7 +10,7 @@ import (
 func TestConnection(t *testing.T) {
 	dialer := NewSocketDialer(SocketConfig{
 		Network:       "tcp",
-		RemoteAddress: "127.0.0.1:8888",
+		RemoteAddress: "127.0.0.1:10700",
 		RetryMax:      10,
 		RetryDelay:    time.Second,
 	}, WithOpenFunc(func(conn net.Conn, config SocketConfig) error {

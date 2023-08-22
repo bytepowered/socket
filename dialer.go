@@ -1,9 +1,10 @@
-package netx
+package socket
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/bytepowered/assert-go"
 	"io"
 	"net"
 	"strings"
@@ -102,11 +103,11 @@ func (sd *SocketDialer) State() SocketState {
 }
 
 func (sd *SocketDialer) Serve() {
-	assert(sd.onDialFunc, "'onDialFunc' is required")
-	assert(sd.onErrorFunc, "'onErrorFunc' is required")
-	assert(sd.onDialFunc, "'onDialFunc' is required")
-	assert(sd.onOpenFunc, "'onOpenFunc' is required")
-	assert(sd.onCloseFunc, "'onCloseFunc' is required")
+	assert.MustNotNil(sd.onDialFunc, "'onDialFunc' is required")
+	assert.MustNotNil(sd.onErrorFunc, "'onErrorFunc' is required")
+	assert.MustNotNil(sd.onDialFunc, "'onDialFunc' is required")
+	assert.MustNotNil(sd.onOpenFunc, "'onOpenFunc' is required")
+	assert.MustNotNil(sd.onCloseFunc, "'onCloseFunc' is required")
 	sd.config.ReadTimeout = sd.incr(sd.config.ReadTimeout, time.Second, time.Second*10)
 	sd.config.RetryDelay = sd.incr(sd.config.RetryDelay, time.Second, time.Second*5)
 	var retries int

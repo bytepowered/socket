@@ -51,17 +51,17 @@ type SocketDialer struct {
 	onErrorFunc OnErrorFunc
 	onDialFunc  OnDialFunc
 	config      SocketConfig
-	downctx     context.Context
-	downfun     context.CancelFunc
+	ctx         context.Context
+	ctxFun      context.CancelFunc
 	conn        net.Conn
 	state       uint32
 }
 
 func NewSocketDialer(config SocketConfig, opts ...SocketDialerOptions) *SocketDialer {
-	ctx, fun := context.WithCancel(context.TODO())
+	ctx, ctxFun := context.WithCancel(context.Background())
 	so := &SocketDialer{
-		downctx:     ctx,
-		downfun:     fun,
+		ctx:         ctx,
+		ctxFun:      ctxFun,
 		config:      config,
 		onDialFunc:  OnTCPDialFunc,
 		onOpenFunc:  OnTCPOpenFunc,
@@ -131,7 +131,7 @@ func (sd *SocketDialer) Serve() {
 	}
 	retry := func(err error) {
 		select {
-		case <-sd.downctx.Done():
+		case <-sd.ctx.Done():
 			sd.setState(SocketStateClosing)
 		default:
 			// next
@@ -182,12 +182,20 @@ func (sd *SocketDialer) Serve() {
 	}
 }
 
+func (sd *SocketDialer) Conn() net.Conn {
+	return sd.conn
+}
+
+func (sd *SocketDialer) Write(p []byte) (n int, err error) {
+	return sd.conn.Write(p)
+}
+
 func (sd *SocketDialer) Shutdown() {
-	sd.downfun()
+	sd.ctxFun()
 }
 
 func (sd *SocketDialer) Done() <-chan struct{} {
-	return sd.downctx.Done()
+	return sd.ctx.Done()
 }
 
 func (sd *SocketDialer) Close() {

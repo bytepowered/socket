@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/bytepowered/assert-go"
+	"github.com/bytepowered/assert"
 	"io"
 	"net"
 	"strings"

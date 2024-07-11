@@ -1,5 +1,5 @@
-module github.com/bytepowered/socket-go
+module github.com/bytepowered/socket
 
 go 1.18
 
-require github.com/bytepowered/assert-go v1.0.2 // indirect
+require github.com/bytepowered/assert v1.1.0
